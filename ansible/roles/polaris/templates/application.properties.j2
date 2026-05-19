@@ -1,0 +1,22 @@
+# ==============================================================================
+# Apache Polaris — application.properties (Quarkus)
+# ==============================================================================
+
+quarkus.http.port={{ polaris_port }}
+quarkus.http.management.port={{ polaris_admin_port }}
+quarkus.http.host=0.0.0.0
+
+# Persistência PostgreSQL
+quarkus.datasource.db-kind={{ polaris_db_kind }}
+quarkus.datasource.jdbc.url={{ polaris_db_url }}
+quarkus.datasource.username={{ polaris_db_user }}
+quarkus.datasource.password={{ polaris_db_pass }}
+
+quarkus.hibernate-orm.database.generation=update
+
+# Bootstrap: realm:clientId:clientSecret
+polaris.bootstrap.credentials={{ polaris_realm }}:{{ polaris_root_client_id }}:{{ polaris_root_client_secret }}
+polaris.default-realm={{ polaris_realm }}
+
+# NÃO adicionar polaris.features.* aqui — formato inválido no 1.3.0-incubating
+# causa crash imediato no Quarkus Config validator
