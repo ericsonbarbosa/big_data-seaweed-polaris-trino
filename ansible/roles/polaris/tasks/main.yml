@@ -120,6 +120,7 @@
     cp -r {{ polaris_extracted_dir }}/* {{ polaris_install_dir }}/
     chown -R {{ polaris_user }}:{{ polaris_group }} {{ polaris_install_dir }}
   become: yes
+  notify: restart polaris
 
 - name: "polaris : Criar link simbólico polaris-runner.jar → server/quarkus-run.jar"
   file:
@@ -289,9 +290,26 @@
       - "Client ID.........: {{ dynamic_client_id }}"
       - "Client Secret.....: {{ dynamic_client_secret }}"
 
+# Após "polaris : Exibir credenciais detectadas"
+
+- name: "polaris : Persistir credenciais bootstrap em arquivo"
+  copy:
+    dest: "{{ polaris_conf_dir }}/bootstrap-credentials.env"
+    owner: "{{ polaris_user }}"
+    group: "{{ polaris_group }}"
+    mode: '0640'
+    content: |
+      POLARIS_REALM={{ dynamic_realm }}
+      POLARIS_CLIENT_ID={{ dynamic_client_id }}
+      POLARIS_CLIENT_SECRET={{ dynamic_client_secret }}
+  become: yes
+
 # ------------------------------------------------------------------------------
 # Obter token OAuth2 do Polaris
 # ------------------------------------------------------------------------------
+- name: "polaris : Forçar execução dos handlers pendentes (Restart Polaris)"
+  meta: flush_handlers
+
 - name: "polaris : Obter token de acesso (root)"
   uri:
     url: "http://127.0.0.1:{{ polaris_port }}/api/catalog/v1/oauth/tokens"
@@ -321,28 +339,69 @@
       Polaris-Realm: "{{ dynamic_realm }}"
     body_format: json
     body:
-      name: "iceberg"
-      type: "INTERNAL"
-
-      properties:
-        default-base-location: "s3://{{ polaris_default_warehouse_bucket }}/iceberg"
-
-      storageConfigInfo:
-        storageType: "S3"
-
-        allowedLocations:
-          - "s3://{{ polaris_default_warehouse_bucket }}/"
-
-        s3.endpoint: "{{ polaris_s3_endpoint }}"
-        s3.access-key-id: "{{ polaris_s3_access_key }}"
-        s3.secret-access-key: "{{ polaris_s3_secret_key }}"
-        s3.path-style-access: "{{ polaris_s3_path_style | string | lower }}"
-        s3.region: "{{ polaris_s3_region }}"
+      catalog:
+        name: "iceberg"
+        type: "INTERNAL"
+        
+        properties:
+          "default-base-location": "s3://{{ polaris_default_warehouse_bucket }}/iceberg"
+          "s3.endpoint": "{{ polaris_s3_endpoint }}"
+          "s3.access-key-id": "{{ polaris_s3_access_key }}"
+          "s3.secret-access-key": "{{ polaris_s3_secret_key }}"
+          "s3.path-style-access": "{{ polaris_s3_path_style | string | lower }}"
+          "s3.region": "{{ polaris_s3_region }}"
+          
+        storageConfigInfo:
+          storageType: "S3"
+          allowedLocations:
+            - "s3://{{ polaris_default_warehouse_bucket }}/"
 
     status_code: [200, 201, 409]
   register: polaris_catalog_result
   become: no
 
+# ------------------------------------------------------------------------------
+# RBAC: Catalog Role com privilégio de gestão
+# ------------------------------------------------------------------------------
+- name: "polaris : Criar Catalog Role dentro do catálogo 'iceberg'"
+  uri:
+    url: "http://127.0.0.1:{{ polaris_port }}/api/management/v1/catalogs/iceberg/catalog-roles"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ polaris_token.json.access_token }}"
+      Content-Type: "application/json"
+      Polaris-Realm: "{{ dynamic_realm }}"
+    body_format: json
+    body:
+      catalogRole:
+        name: "iceberg_admin_role"
+    status_code: [200, 201, 409]
+  become: no
+
+- name: "polaris : Aguardar registro da Catalog Role"
+  pause:
+    seconds: 3
+
+- name: "polaris : Conceder privilégio CATALOG_MANAGE_CONTENT à Catalog Role"
+  uri:
+    url: "http://127.0.0.1:{{ polaris_port }}/api/management/v1/catalogs/iceberg/catalog-roles/iceberg_admin_role/grants"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ polaris_token.json.access_token }}"
+      Content-Type: "application/json"
+      Polaris-Realm: "{{ dynamic_realm }}"
+    body_format: json
+    body:
+      grant:
+        type: "catalog"
+        privilege: "CATALOG_MANAGE_CONTENT"
+    status_code: [200, 201]
+  register: grant_result
+  retries: 3
+  delay: 2
+  until: grant_result.status in [200, 201]
+  become: no
+  
 # ------------------------------------------------------------------------------
 # DEBUG catálogo
 # ------------------------------------------------------------------------------

@@ -38,6 +38,15 @@
     creates: "{{ install_dir }}/trino-server-{{ trino_version }}"
   become: yes
 
+- name: "trino : Corrigir ownership do diretório de instalação"
+  file:
+    path: "{{ install_dir }}/trino-server-{{ trino_version }}"
+    state: directory
+    owner: trino
+    group: trino
+    recurse: yes
+  become: yes
+
 - name: "trino : Criar link simbólico"
   file:
     src: "{{ install_dir }}/trino-server-{{ trino_version }}"
@@ -88,6 +97,53 @@
     - config.properties
   become: yes
 
+# Antes de "trino : Configurar catálogo Iceberg (Polaris)"
+
+- name: "trino : Ler credenciais Polaris do seaweedfs-node"
+  slurp:
+    src: /etc/polaris/bootstrap-credentials.env
+  delegate_to: seaweedfs-node
+  register: polaris_creds_raw
+  become: yes
+
+- name: "trino : Extrair credenciais Polaris como facts locais"
+  set_fact:
+    dynamic_client_id: >-
+      {{
+        (polaris_creds_raw.content | b64decode).splitlines()
+        | select('match', 'POLARIS_CLIENT_ID=.*')
+        | first
+        | regex_replace('^POLARIS_CLIENT_ID=', '')
+      }}
+    dynamic_client_secret: >-
+      {{
+        (polaris_creds_raw.content | b64decode).splitlines()
+        | select('match', 'POLARIS_CLIENT_SECRET=.*')
+        | first
+        | regex_replace('^POLARIS_CLIENT_SECRET=', '')
+      }}
+
+- name: "trino : Obter token OAuth2 do Polaris (scope PRINCIPAL_ROLE:ALL)"
+  uri:
+    url: "http://192.168.56.101:8182/api/catalog/v1/oauth/tokens"
+    method: POST
+    headers:
+      Polaris-Realm: "POLARIS"
+    body_format: form-urlencoded
+    body:
+      grant_type: client_credentials
+      client_id: "{{ dynamic_client_id }}"
+      client_secret: "{{ dynamic_client_secret }}"
+      scope: "PRINCIPAL_ROLE:ALL"
+    status_code: 200
+  register: trino_token_response
+  delegate_to: seaweedfs-node
+  become: no
+
+- name: "trino : Registrar token Polaris como fact"
+  set_fact:
+    polaris_access_token: "{{ trino_token_response.json.access_token }}"
+
 - name: "trino : Configurar catálogo Iceberg (Polaris)"
   template:
     src: catalog/iceberg.properties.j2
@@ -95,7 +151,7 @@
     owner: trino
     group: trino
     mode: '0644'
-  notify: Restart Trino
+  notify: restart trino
   become: yes
 
 # ==============================================================================

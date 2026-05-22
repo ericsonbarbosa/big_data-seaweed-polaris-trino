@@ -17,6 +17,3 @@ quarkus.hibernate-orm.database.generation=update
 # Bootstrap: realm:clientId:clientSecret
 polaris.bootstrap.credentials={{ polaris_realm }}:{{ polaris_root_client_id }}:{{ polaris_root_client_secret }}
 polaris.default-realm={{ polaris_realm }}
-
-# NÃO adicionar polaris.features.* aqui — formato inválido no 1.3.0-incubating
-# causa crash imediato no Quarkus Config validator

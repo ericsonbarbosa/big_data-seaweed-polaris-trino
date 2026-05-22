@@ -53,8 +53,3 @@ polaris_default_warehouse_bucket: "warehouse"
 polaris_archive: "polaris-bin-1.3.0-incubating.tgz"
 # Pasta que o tar.gz cria ao ser descompactado (verifique se o nome bate)
 polaris_unarchive_dir: "polaris-1.3.0-incubating"
-
-# Diretórios de destino (mantidos conforme solicitado anteriormente)
-polaris_install_dir: /opt/polaris
-polaris_conf_dir: /etc/polaris
-polaris_log_dir: /var/log/polaris

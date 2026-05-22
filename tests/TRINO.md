@@ -31,7 +31,7 @@ Este nó é responsável pela execução de queries de alta performance sobre os
     ```
 * **Acesso ao Trino CLI:**
     ```bash
-    trino --catalog hive --schema default
+    trino --catalog iceberg --schema default
     ```
     *Nota: O Trino utiliza conectores para "enxergar" o catálogo do Hive e os arquivos físicos no HDFS.*
 
@@ -57,6 +57,25 @@ SELECT * FROM lab_ed.usuarios;
 
 -- 5. Visualizar todas as tabelas criadas dento do lab_ed.db
 SHOW TABLES FROM lab_ed;
+
+-- ou
+
+-- Deve listar o catalog iceberg
+SHOW CATALOGS;
+
+-- Cria um schema de teste
+CREATE SCHEMA IF NOT EXISTS iceberg.sandbox
+WITH (location = 's3://warehouse/sandbox/');
+
+-- Cria uma tabela Iceberg real gravando no SeaweedFS
+CREATE TABLE iceberg.sandbox.teste (
+    id    BIGINT,
+    nome  VARCHAR
+) WITH (format = 'PARQUET');
+
+INSERT INTO iceberg.sandbox.teste VALUES (1, 'Polaris OK');
+
+SELECT * FROM iceberg.sandbox.teste;
 ```
 
 ### ✅ Passo B: – Verificar a gravação dos dados no SeaweedFS S3
