@@ -1,19 +1,34 @@
 # ==============================================================================
-# Apache Polaris — application.properties (Quarkus)
+# Apache Polaris — application.properties.j2
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# HTTP & Admin
+# ------------------------------------------------------------------------------
 quarkus.http.port={{ polaris_port }}
-quarkus.http.management.port={{ polaris_admin_port }}
 quarkus.http.host=0.0.0.0
+quarkus.management.enabled=true
+quarkus.management.port={{ polaris_admin_port }}
+quarkus.management.host=0.0.0.0
 
-# Persistência PostgreSQL
-quarkus.datasource.db-kind={{ polaris_db_kind }}
+# ------------------------------------------------------------------------------
+# PostgreSQL
+# ------------------------------------------------------------------------------
+polaris.persistence.type=relational-jdbc
+
+quarkus.datasource.db-kind=postgresql
 quarkus.datasource.jdbc.url={{ polaris_db_url }}
 quarkus.datasource.username={{ polaris_db_user }}
 quarkus.datasource.password={{ polaris_db_pass }}
 
-quarkus.hibernate-orm.database.generation=update
-
-# Bootstrap: realm:clientId:clientSecret
+# ------------------------------------------------------------------------------
+# Bootstrap
+# ------------------------------------------------------------------------------
+polaris.realm-context.realms={{ polaris_realm }}
 polaris.bootstrap.credentials={{ polaris_realm }}:{{ polaris_root_client_id }}:{{ polaris_root_client_secret }}
-polaris.default-realm={{ polaris_realm }}
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+quarkus.log.level=INFO
+quarkus.log.file.path={{ polaris_log_dir }}/polaris.log

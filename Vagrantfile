@@ -20,7 +20,7 @@ Vagrant.configure("2") do |config|
     seaweedfs.vm.provider "virtualbox" do |vb|
       vb.name = "seaweedfs-node"
       vb.memory = 4096
-      vb.cpus = 2
+      vb.cpus = 4
     end
   end
 
