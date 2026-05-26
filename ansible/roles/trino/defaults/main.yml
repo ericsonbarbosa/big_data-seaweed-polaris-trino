@@ -14,3 +14,9 @@ trino_config_dir: "{{ install_dir }}/trino-server-{{ trino_version }}/etc"
 seaweedfs_s3_endpoint: "http://192.168.56.101:8333"
 seaweedfs_s3_access_key: "admin"
 seaweedfs_s3_secret_key: "admin_secret"
+
+# ====================================================================
+# CREDENCIAIS E ENDPOINT DO POLARIS
+# ====================================================================
+polaris_client_id: "root"
+polaris_client_secret: "root_secret_changeme"

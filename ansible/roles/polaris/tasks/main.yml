@@ -1,4 +1,3 @@
----
 # ==============================================================================
 # 1. JAVA 21
 # ==============================================================================
@@ -10,9 +9,7 @@
   become: yes
 
 - name: "polaris : Verificar versão do Java"
-  command: java -version
-  environment:
-    JAVA_HOME: "{{ polaris_java_home }}"
+  command: "{{ polaris_java_home }}/bin/java -version"
   register: java_version
   changed_when: false
 
@@ -49,9 +46,8 @@
   become: yes
 
 # ==============================================================================
-#  BANCO DE DADOS POSTGRESQL
+# BANCO DE DADOS POSTGRESQL
 # ==============================================================================
-
 - name: "polaris : Criar usuário PostgreSQL para Polaris"
   postgresql_user:
     name: "{{ polaris_db_user }}"
@@ -68,7 +64,7 @@
   become: yes
   become_user: postgres
 
-- name: "polaris : Criar schema polaris_schema com owner correto"
+- name: "polaris : Configurar schema polaris_schema"
   postgresql_query:
     db: "{{ polaris_db_name }}"
     query: |
@@ -79,109 +75,49 @@
   become_user: postgres
   notify: restart polaris
 
-- name: "polaris : Conceder ALL no schema public"
-  postgresql_privs:
-    db: "{{ polaris_db_name }}"
-    role: "{{ polaris_db_user }}"
-    type: schema
-    objs: public
-    privs: ALL
-  become: yes
-  become_user: postgres
-
 # ==============================================================================
 # 3. DOWNLOAD E INSTALAÇÃO
 # ==============================================================================
-
-- name: "polaris : Limpar diretório temporário antes de extrair"
+- name: "polaris : Limpar/Criar diretório temporário"
   file:
     path: "/tmp/polaris_extract"
-    state: absent
+    state: "{{ item }}"
+  loop: [absent, directory]
   become: yes
 
-- name: "polaris : Criar diretório temporário de extração"
-  file:
-    path: "/tmp/polaris_extract"
-    state: directory
-    mode: '0755'
-  become: yes
-
-- name: "polaris : Descompactar binário para o servidor"
+- name: "polaris : Descompactar binário"
   unarchive:
     src: "{{ polaris_archive }}"
     dest: "/tmp/polaris_extract"
-    owner: "{{ polaris_user }}"
-    group: "{{ polaris_group }}"
   become: yes
 
-# O archive extrai para polaris-bin-X.Y.Z-incubating/ — capturamos dinamicamente
-# para não depender da versão fixada em variável.
 - name: "polaris : Identificar diretório raiz extraído"
   find:
     paths: "/tmp/polaris_extract"
     file_type: directory
-    recurse: no
   register: extracted_root
   become: yes
 
-- name: "polaris : Falhar se o diretório raiz não foi encontrado"
-  fail:
-    msg: >
-      Nenhum diretório encontrado em /tmp/polaris_extract após a extração.
-      Verifique se 'polaris_archive' aponta para o arquivo correto.
-  when: extracted_root.files | length == 0
-
-- name: "polaris : Registrar caminho raiz extraído"
-  set_fact:
-    polaris_extracted_dir: "{{ extracted_root.files[0].path }}"
-
-- name: "polaris : Verificar que o JAR Quarkus existe no pacote extraído"
-  stat:
-    path: "{{ polaris_extracted_dir }}/server/quarkus-run.jar"
-  register: quarkus_jar_stat
+- name: "polaris : Copiar conteúdo extraído"
+  copy:
+    src: "{{ extracted_root.files[0].path }}/"
+    dest: "{{ polaris_install_dir }}/"
+    remote_src: yes
+    owner: "{{ polaris_user }}"
+    group: "{{ polaris_group }}"
   become: yes
 
-- name: "polaris : Falhar se quarkus-run.jar não existe no pacote"
-  fail:
-    msg: >
-      Arquivo '{{ polaris_extracted_dir }}/server/quarkus-run.jar' não encontrado.
-      Estrutura inesperada no archive '{{ polaris_archive }}'.
-  when: not quarkus_jar_stat.stat.exists
-
-- name: "polaris : Copiar conteúdo extraído para o diretório final"
-  shell: |
-    cp -r {{ polaris_extracted_dir }}/* {{ polaris_install_dir }}/
-    chown -R {{ polaris_user }}:{{ polaris_group }} {{ polaris_install_dir }}
-  become: yes
-
-- name: "polaris : Criar link simbólico polaris-runner.jar → server/quarkus-run.jar"
+- name: "polaris : Criar link simbólico"
   file:
     src: "{{ polaris_install_dir }}/server/quarkus-run.jar"
     dest: "{{ polaris_install_dir }}/polaris-runner.jar"
     state: link
-    force: yes
     owner: "{{ polaris_user }}"
     group: "{{ polaris_group }}"
-  become: yes
-
-- name: "polaris : Garantir permissões no diretório de instalação"
-  file:
-    path: "{{ polaris_install_dir }}"
-    state: directory
-    owner: "{{ polaris_user }}"
-    group: "{{ polaris_group }}"
-    recurse: yes
-    mode: '0755'
-  become: yes
-
-- name: "polaris : Remover diretório temporário de extração"
-  file:
-    path: "/tmp/polaris_extract"
-    state: absent
   become: yes
 
 # ==============================================================================
-# 4. CONFIGURAÇÃO
+# 4. CONFIGURAÇÃO E SERVIÇO
 # ==============================================================================
 - name: "polaris : Aplicar application.properties"
   template:
@@ -193,311 +129,73 @@
   become: yes
   notify: restart polaris
 
-# ==============================================================================
-# 5. SERVIÇO SYSTEMD
-# ==============================================================================
 - name: "polaris : Instalar unit systemd"
   template:
     src: polaris.service.j2
     dest: /etc/systemd/system/polaris.service
-    mode: '0644'
   become: yes
   notify: reload systemd
 
-- name: "polaris : Recarregar daemon do systemd"
-  systemd:
-    daemon_reload: yes
-  become: yes
-
 # ==============================================================================
-# 6. INICIALIZAÇÃO DO BANCO E SERVIÇO (CORRIGIDO)
+# 5. BOOTSTRAP E APIs (Idempotentes)
 # ==============================================================================
-- name: "polaris : Verificar se o arquivo de credenciais já existe"
-  stat:
-    path: "{{ polaris_conf_dir }}/bootstrap-credentials.env"
-  register: bootstrap_file
-
-- name: "polaris : Inicializar banco e aplicar migrações"
-  systemd:
-    name: polaris
-    state: started
-    enabled: yes
-    daemon_reload: yes
+- name: "polaris : Executar bootstrap se necessário"
+  shell: |
+    {{ polaris_java_home }}/bin/java \
+    -Dquarkus.config.locations={{ polaris_conf_dir }}/application.properties \
+    -jar {{ polaris_install_dir }}/admin/quarkus-run.jar bootstrap -r POLARIS -c POLARIS,root,{{ polaris_root_client_secret }}
   become: yes
-  when: not bootstrap_file.stat.exists
+  environment:
+    JAVA_HOME: "{{ polaris_java_home }}"
+  args:
+    creates: "{{ polaris_conf_dir }}/bootstrap-credentials.env"
+  register: bootstrap_run
 
-- name: "polaris : Aguardar inicialização do serviço (120 segundos)"
-  wait_for:
-    timeout: 120
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Criar arquivo de credenciais bootstrap (marcador)"
-  file:
-    path: "{{ polaris_conf_dir }}/bootstrap-credentials.env"
-    state: touch
-    owner: "{{ polaris_user }}"
-    group: "{{ polaris_group }}"
-    mode: '0600'
-  become: yes
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Validar tabelas criadas"
-  postgresql_query:
-    db: "{{ polaris_db_name }}"
-    query: |
-      SELECT COUNT(*) as table_count
-      FROM information_schema.tables
-      WHERE table_schema = 'public'
-      AND table_name LIKE 'polaris%'
-  register: polaris_tables
-  become: yes
-  become_user: postgres
-  retries: 5
-  delay: 10
-  ignore_errors: yes
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Log de tabelas (para diagnóstico)"
-  debug:
-    msg: "Schema tables count: {{ polaris_tables.query_result[0].table_count | default('unknown') }}"
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Usar credenciais padrão do bootstrap (Novo Boot)"
-  set_fact:
-    dynamic_realm: "{{ polaris_realm }}"
-    dynamic_client_id: "{{ polaris_root_client_id }}"
-    dynamic_client_secret: "{{ polaris_root_client_secret }}"
-  when: not bootstrap_file.stat.exists
-
-# --- Recuperação em caso de re-execução do Playbook ---
-- name: "polaris : Recuperar Client ID salvo anteriormente"
-  shell: "grep POLARIS_CLIENT_ID {{ polaris_conf_dir }}/bootstrap-credentials.env | cut -d= -f2"
-  register: saved_client_id
-  when: bootstrap_file.stat.exists
-  changed_when: false
-  become: yes
-
-- name: "polaris : Recuperar Client Secret salvo anteriormente"
-  shell: "grep POLARIS_CLIENT_SECRET {{ polaris_conf_dir }}/bootstrap-credentials.env | cut -d= -f2"
-  register: saved_client_secret
-  when: bootstrap_file.stat.exists
-  changed_when: false
-  become: yes
-
-- name: "polaris : Definir fatos das credenciais (Arquivo Existente)"
-  set_fact:
-    dynamic_realm: "{{ polaris_realm }}"
-    dynamic_client_id: "{{ saved_client_id.stdout | trim }}"
-    dynamic_client_secret: "{{ saved_client_secret.stdout | trim }}"
-  when: bootstrap_file.stat.exists
-
-# --- Exibição e Persistência ---
-- name: "polaris : Exibir credenciais detectadas"
-  debug:
-    msg:
-      - "Realm.............: {{ dynamic_realm }}"
-      - "Client ID.........: {{ dynamic_client_id }}"
-      - "Client Secret.....: {{ dynamic_client_secret }}"
-
-- name: "polaris : Persistir credenciais bootstrap em arquivo"
+- name: "polaris : Criar marcador de bootstrap"
   copy:
     dest: "{{ polaris_conf_dir }}/bootstrap-credentials.env"
-    owner: "{{ polaris_user }}"
-    group: "{{ polaris_group }}"
-    mode: '0640'
-    content: |
-      POLARIS_REALM={{ dynamic_realm }}
-      POLARIS_CLIENT_ID={{ dynamic_client_id }}
-      POLARIS_CLIENT_SECRET={{ dynamic_client_secret }}
-  become: yes
-  when: not bootstrap_file.stat.exists
+    content: "BOOTSTRAP_COMPLETE=true"
+  when: bootstrap_run.changed
 
-# --- Inicialização do Serviço no Systemd ---
-- name: "polaris : Iniciar e habilitar serviço"
+- name: "polaris : Iniciar serviço"
   systemd:
     name: polaris
     state: started
     enabled: yes
+    daemon_reload: yes
   become: yes
 
-- name: "polaris : Aguardar porta do REST Catalog estar disponível"
-  wait_for:
-    host: "127.0.0.1"
-    port: "{{ polaris_port }}"
-    delay: 10
-    timeout: 300
-
-- name: "polaris : Aguardar health check (Quarkus SmallRye Health)"
-  uri:
-    url: "http://127.0.0.1:{{ polaris_admin_port }}/q/health/ready"
-    method: GET
-    status_code: [200]
-  register: health_result
-  until: health_result.status == 200
-  retries: 36
-  delay: 10
-  ignore_errors: yes
-  become: no
-
-- name: "polaris : Pausa de estabilização final"
-  pause:
-    seconds: 5
-  when: not bootstrap_file.stat.exists
-
-# ==============================================================================
-# 7. CONFIGURAÇÃO SEAWEEDFS E CATÁLOGO ICEBERG
-# ==============================================================================
-- name: "polaris : Instalar AWS CLI (para criar bucket no SeaweedFS)"
-  apt:
-    name: awscli
-    state: present
-  become: yes
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Criar bucket 'warehouse' no SeaweedFS"
-  shell: |
-    aws s3 mb s3://{{ polaris_default_warehouse_bucket }} \
-      --endpoint-url {{ polaris_s3_endpoint }}
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ polaris_s3_access_key }}"
-    AWS_SECRET_ACCESS_KEY: "{{ polaris_s3_secret_key }}"
-    AWS_DEFAULT_REGION: "{{ polaris_s3_region }}"
-  register: bucket_result
-  failed_when:
-    - bucket_result.rc != 0
-    - "'BucketAlreadyOwnedByYou' not in bucket_result.stderr"
-    - "'BucketAlreadyExists' not in bucket_result.stderr"
-  changed_when: "'make_bucket' in bucket_result.stdout"
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Forçar execução dos handlers pendentes (Restart Polaris)"
-  meta: flush_handlers
-
-- name: "polaris : Aguardar Polaris responder na porta após restart"
-  wait_for:
-    host: "127.0.0.1"
-    port: "{{ polaris_port }}"
-    delay: 5
-    timeout: 360
-
-- name: "polaris : Aguardar health check após restart"
-  uri:
-    url: "http://127.0.0.1:{{ polaris_admin_port }}/q/health/ready"
-    method: GET
-    status_code: [200]
-  register: health_after_restart
-  until: health_after_restart.status == 200
-  retries: 18
-  delay: 5
-  ignore_errors: yes
-
-- name: "polaris : Pausa de estabilização pós-restart"
-  pause:
-    seconds: 5
-
-- name: "polaris : Obter token de acesso (root)"
+- name: "polaris : Obter token de acesso"
   uri:
     url: "http://127.0.0.1:{{ polaris_port }}/api/catalog/v1/oauth/tokens"
     method: POST
-    headers:
-      Polaris-Realm: "{{ dynamic_realm }}"
     body_format: form-urlencoded
     body:
       grant_type: "client_credentials"
-      client_id: "{{ dynamic_client_id }}"
-      client_secret: "{{ dynamic_client_secret }}"
+      client_id: "root"
+      client_secret: "{{ polaris_root_client_secret }}"
       scope: "PRINCIPAL_ROLE:ALL"
-    status_code: 200
   register: polaris_token
+  until: polaris_token.status == 200
+  retries: 10
+  delay: 5
 
-# ------------------------------------------------------------------------------
-# Criar catálogo Iceberg
-# ------------------------------------------------------------------------------
-- name: "polaris : Criar catalog 'iceberg' apontando para SeaweedFS"
+- name: "polaris : Criar ou validar catálogo 'iceberg'"
   uri:
     url: "http://127.0.0.1:{{ polaris_port }}/api/management/v1/catalogs"
     method: POST
     headers:
       Authorization: "Bearer {{ polaris_token.json.access_token }}"
       Content-Type: "application/json"
-      Polaris-Realm: "{{ dynamic_realm }}"
     body_format: json
     body:
       catalog:
         name: "iceberg"
         type: "INTERNAL"
-        
         properties:
           "default-base-location": "s3://{{ polaris_default_warehouse_bucket }}/iceberg"
-          "s3.endpoint": "{{ polaris_s3_endpoint }}"
-          "s3.access-key-id": "{{ polaris_s3_access_key }}"
-          "s3.secret-access-key": "{{ polaris_s3_secret_key }}"
-          "s3.path-style-access": "{{ polaris_s3_path_style | string | lower }}"
-          "s3.region": "{{ polaris_s3_region }}"
-          
         storageConfigInfo:
           storageType: "S3"
-          allowedLocations:
-            - "s3://{{ polaris_default_warehouse_bucket }}/"
-
+          allowedLocations: ["s3://{{ polaris_default_warehouse_bucket }}/"]
     status_code: [200, 201, 409]
-  register: polaris_catalog_result
-  when: not bootstrap_file.stat.exists
-  retries: 3
-  delay: 5
-  until: polaris_catalog_result.status in [200, 201, 409]
-
-# ------------------------------------------------------------------------------
-# RBAC: Catalog Role com privilégio de gestão
-# ------------------------------------------------------------------------------
-- name: "polaris : Criar Catalog Role dentro do catálogo 'iceberg'"
-  uri:
-    url: "http://127.0.0.1:{{ polaris_port }}/api/management/v1/catalogs/iceberg/catalog-roles"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ polaris_token.json.access_token }}"
-      Content-Type: "application/json"
-      Polaris-Realm: "{{ dynamic_realm }}"
-    body_format: json
-    body:
-      catalogRole:
-        name: "iceberg_admin_role"
-    status_code: [200, 201, 409]
-  when: not bootstrap_file.stat.exists
-  retries: 3
-  delay: 5
-  until: polaris_catalog_role.status in [200, 201, 409]
-  register: polaris_catalog_role
-
-- name: "polaris : Aguardar registro da Catalog Role"
-  pause:
-    seconds: 3
-  when: not bootstrap_file.stat.exists
-
-- name: "polaris : Conceder privilégio CATALOG_MANAGE_CONTENT à Catalog Role"
-  uri:
-    url: "http://127.0.0.1:{{ polaris_port }}/api/management/v1/catalogs/iceberg/catalog-roles/iceberg_admin_role/grants"
-    method: PUT
-    headers:
-      Authorization: "Bearer {{ polaris_token.json.access_token }}"
-      Content-Type: "application/json"
-      Polaris-Realm: "{{ dynamic_realm }}"
-    body_format: json
-    body:
-      grant:
-        type: "catalog"
-        privilege: "CATALOG_MANAGE_CONTENT"
-    status_code: [200, 201]
-  register: grant_result
-  retries: 3
-  delay: 2
-  until: grant_result.status in [200, 201]
-  when: not bootstrap_file.stat.exists
-  
-# ------------------------------------------------------------------------------
-# DEBUG catálogo
-# ------------------------------------------------------------------------------
-- name: "polaris : Mostrar resultado da criação do catálogo"
-  debug:
-    var: polaris_catalog_result.status
-  when: not bootstrap_file.stat.exists
+  register: catalog_result
