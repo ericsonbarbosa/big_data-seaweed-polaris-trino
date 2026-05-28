@@ -22,10 +22,13 @@ quarkus.datasource.username={{ polaris_db_user }}
 quarkus.datasource.password={{ polaris_db_pass }}
 
 # ------------------------------------------------------------------------------
-# Bootstrap
+# Bootstrap & Realm
 # ------------------------------------------------------------------------------
 polaris.realm-context.realms={{ polaris_realm }}
 polaris.bootstrap.credentials={{ polaris_realm }}:{{ polaris_root_client_id }}:{{ polaris_root_client_secret }}
+
+# Permite que clientes (como Trino 442) conectem sem enviar o header Polaris-Realm
+polaris.realm-context.require-header=false
 
 # ------------------------------------------------------------------------------
 # Logging

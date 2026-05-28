@@ -59,6 +59,7 @@ seaweed-trino-lab-data-lakehouse/
 ## Renovação de TOKEN:
 ```bash
 # 1. Execute o request para renovar e salvar na variável TOKEN (Python)
+# 1.1 Substitua <CLIENT_ID> = root, <CLIENT_SECRET> = root_secret_changeme
 export TOKEN=$(curl -s -X POST \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=<CLIENT_ID>&client_secret=<CLIENT_SECRET>&scope=PRINCIPAL_ROLE:ALL" \
@@ -269,11 +270,26 @@ for VM in "seaweedfs-node:key_seaweed" "trino-sea-node:key_trino" "k8s-node:key_
 
 ## Outros comandos
 
-### Utilizando TAGs
+### Utilizando TAGs Ansible
 ```bash
 ansible-playbook -i ansible/inventory/hosts.ini ansible/playbook.yml --tags "seaweed"
 
 # ou
 
 ./setup.sh --tags seaweed
+```
+
+### Utilizando SSH e Vagarent para acessar as VMs
+
+```bash
+# Acesso via SSH com o Vagrant
+vagrant ssh 192.169.56.101
+# ou (nome da VM no virtual box)
+vagrant ssh seaweedfs-node
+
+# Acesso via SSH com iteração da com a chave SSH privada.
+ssh -i .\.vagrant\machines\seaweedfs-node\virtualbox\private_key vagrant@192.168.56.101
+
+# Vagrant destroy - Limpar IP antigo da tabela SSH Windows
+ssh-keygen -R 192.168.56.101
 ```

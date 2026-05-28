@@ -29,6 +29,22 @@ Este nó é responsável pela execução de queries de alta performance sobre os
     ```bash
     vagrant ssh trino-node
     ```
+* **Inserir o TOKEN novo no catalog iceberg.properties do Trino:**
+    ```bash
+    # Captura do TOKEN para a variável TOKEN_TRINO:
+    TOKEN_TRINO=$(curl -s -X POST http://192.168.56.101:8182/api/catalog/v1/oauth/tokens \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=client_credentials&client_id=root&client_secret=root_secret_changeme&scope=PRINCIPAL_ROLE:ALL" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+    # Aplicação do TOKEN_TRINO no iceberg.properties da VM:
+    sudo sed -i "s|^iceberg.rest-catalog.oauth2.token=.*|iceberg.rest-catalog.oauth2.token=$TOKEN_TRINO|" \
+    /opt/trino/etc/catalog/iceberg.properties
+
+    # Restart do serviço com pausa de 15 segundos:
+    sudo systemctl restart trino && sleep 15
+    ```
+
 * **Acesso ao Trino CLI:**
     ```bash
     trino --catalog iceberg --schema default
@@ -41,31 +57,15 @@ Este nó é responsável pela execução de queries de alta performance sobre os
 Objetivo: Validar se o Trino consegue ler do Hive e criar novos arquivos no S3. No `Trino CLI`, execute:
 
 ```sql
--- 1. Criar um schema (banco de dados) no catálogo do Hive
-CREATE SCHEMA hive.lab_ed;
-
--- 2. Criar a tabela
-CREATE TABLE hive.lab_ed.usuarios (
-    id BIGINT, nome VARCHAR, cargo VARCHAR
-) WITH (format = 'PARQUET');
-
--- 3. Inserir os dados (Este é o momento da verdade!)
-INSERT INTO lab_ed.usuarios VALUES (1, 'Ericson', 'Data Engineer'), (2, 'Ana Vitória', 'Little Artist');
-
--- 4. Consultar os dados
-SELECT * FROM lab_ed.usuarios;
-
--- 5. Visualizar todas as tabelas criadas dento do lab_ed.db
-SHOW TABLES FROM lab_ed;
-
--- ou
-
 -- Deve listar o catalog iceberg
 SHOW CATALOGS;
 
+-- Mostrar os SCHEMS dentro do iceberg
+SHOW SCHEMAS IN iceberg;
+
 -- Cria um schema de teste
-CREATE SCHEMA IF NOT EXISTS iceberg.sandbox
-WITH (location = 's3://warehouse/sandbox/');
+    CREATE SCHEMA IF NOT EXISTS iceberg.sandbox
+    WITH (location = 's3://warehouse/sandbox/');
 
 -- Cria uma tabela Iceberg real gravando no SeaweedFS
 CREATE TABLE iceberg.sandbox.teste (

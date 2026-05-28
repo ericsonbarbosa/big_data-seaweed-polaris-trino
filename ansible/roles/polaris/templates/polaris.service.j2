@@ -18,6 +18,7 @@ ExecStart={{ polaris_java_home }}/bin/java \
 
 Environment="AWS_ACCESS_KEY_ID={{ polaris_s3_access_key }}"
 Environment="AWS_SECRET_ACCESS_KEY={{ polaris_s3_secret_key }}"
+Environment="AWS_REGION={{ polaris_s3_region }}"
 Environment="AWS_DEFAULT_REGION={{ polaris_s3_region }}"
 Environment="JAVA_HOME={{ polaris_java_home }}"
 
